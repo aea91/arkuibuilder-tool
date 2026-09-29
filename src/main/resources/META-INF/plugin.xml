@@ -1,0 +1,27 @@
+<idea-plugin>
+    <id>com.arkuibuilder.tool</id>
+    <name>ArkUIBuilder Tool</name>
+    <vendor url="https://huaweidevelopers.com">ArkUIBuilder</vendor>
+
+    <!-- description and change notes are set in build.gradle.kts -->
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow
+                id="ArkUIBuilder"
+                anchor="right"
+                icon="AllIcons.Toolwindows.ToolWindowPalette"
+                factoryClass="com.arkuibuilder.tool.ui.ArkuiBuilderToolWindowFactory"/>
+    </extensions>
+
+    <actions>
+        <action
+                id="com.arkuibuilder.tool.ShowToolWindow"
+                class="com.arkuibuilder.tool.actions.ShowArkuiBuilderAction"
+                text="Open ArkUIBuilder"
+                description="Open the ArkUIBuilder tool window">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+    </actions>
+</idea-plugin>
