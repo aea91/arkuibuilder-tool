@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Custom plugin repository for DevEco Studio.
+  DevEco's Marketplace tab hides every plugins.jetbrains.com plugin that is not on Huawei's
+  built-in whitelist, but plugins from other repository hosts are not filtered. Add this file's
+  raw GitHub URL under Plugins → gear → Manage Plugin Repositories…
+  On each release: bump version, point url at the new Marketplace download.
+-->
+<plugins>
+    <plugin id="com.arkuibuilder.tool"
+            url="https://downloads.marketplace.jetbrains.com/files/34630/1182233/arkuibuildertool-0.3.2.zip"
+            version="0.3.2">
+        <idea-version since-build="233.0"/>
+        <name>ArkUIBuilder Tool</name>
+        <vendor>ArkUIBuilder</vendor>
+        <description>Browse ArkUI widget / manager snippets from ArkUIBuilder and insert ArkTS code into the current editor in DevEco Studio.</description>
+    </plugin>
+</plugins>
