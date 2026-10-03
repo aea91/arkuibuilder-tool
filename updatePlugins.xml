@@ -8,8 +8,8 @@
 -->
 <plugins>
     <plugin id="com.arkuibuilder.tool"
-            url="https://downloads.marketplace.jetbrains.com/files/34630/1182233/arkuibuildertool-0.3.2.zip"
-            version="0.3.2">
+            url="https://downloads.marketplace.jetbrains.com/files/34630/1186838/arkuibuildertool-0.3.3.zip"
+            version="0.3.3">
         <idea-version since-build="233.0"/>
         <name>ArkUIBuilder Tool</name>
         <vendor>ArkUIBuilder</vendor>
