@@ -19,7 +19,7 @@ Companion to [ArkUIBuilder](https://huaweidevelopers.com) (`arkuibuild`).
 ZIP output:
 
 ```text
-build/distributions/arkuibuildertool-0.3.2.zip
+build/distributions/arkuibuildertool-0.3.3.zip
 ```
 
 Flow: **Platform → GIF gallery → code** (optional Category filter, Firestore `mainCategory` / `category`). Previews use `proxyImage` and load lazily as you scroll.

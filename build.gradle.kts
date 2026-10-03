@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "com.arkuibuilder"
-version = "0.3.2"
+version = "0.3.3"
 
 repositories {
     mavenCentral()
@@ -40,7 +40,7 @@ intellijPlatform {
             <p>Browse ready-made ArkUI widgets from the ArkUIBuilder catalog and insert their ArkTS
             code into the current editor in DevEco Studio or any IntelliJ-based IDE.</p>
             <ul>
-              <li>Pick a platform (Mobile, Smart Wearable, PC&nbsp;2in1) to see a gallery of animated previews</li>
+              <li>Pick a platform (Mobile, Wearable, PC&nbsp;2in1) to see a gallery of animated previews</li>
               <li>Filter by category or search by name, description and tags</li>
               <li>Click a preview to see its code, then <b>Insert into editor</b> or <b>Copy code</b></li>
               <li>Previews load lazily as you scroll</li>
@@ -51,6 +51,8 @@ intellijPlatform {
         """.trimIndent()
 
         changeNotes = """
+            <h3>0.3.3</h3>
+            <ul><li>"Smart Wearable" platform is now shown as "Wearable"</li></ul>
             <h3>0.3.2</h3>
             <ul><li>Fixed animated previews not appearing in the gallery</li></ul>
             <h3>0.3.1</h3>

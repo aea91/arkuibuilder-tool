@@ -199,9 +199,15 @@ class ArkuiBuilderPanel(private val project: Project) : JPanel(BorderLayout()) {
         }
     }
 
+    /** Platform label shown in the tool; Firestore's "Smart Wearable" is displayed as "Wearable". */
+    private fun platformOf(w: WidgetSnippet): String {
+        val platform = w.mainCategory.ifBlank { "Other" }
+        return if (platform == "Smart Wearable") "Wearable" else platform
+    }
+
     private fun rebuildPlatforms(selectFirst: Boolean) {
-        val preferredOrder = listOf("Mobile", "Smart Wearable", "Light Wearable", "PC (2in1)", "Wearable", "PC", "Phone")
-        val platforms = all.map { it.mainCategory.ifBlank { "Other" } }.distinct()
+        val preferredOrder = listOf("Mobile", "Wearable", "Light Wearable", "PC (2in1)", "PC", "Phone")
+        val platforms = all.map { platformOf(it) }.distinct()
             .sortedWith(
                 compareBy<String> { preferredOrder.indexOf(it).let { i -> if (i < 0) Int.MAX_VALUE else i } }
                     .thenBy { it.lowercase() },
@@ -234,7 +240,7 @@ class ArkuiBuilderPanel(private val project: Project) : JPanel(BorderLayout()) {
         val categories = if (platform == null) {
             emptyList()
         } else {
-            all.filter { it.mainCategory.ifBlank { "Other" } == platform }
+            all.filter { platformOf(it) == platform }
                 .map { it.category.ifBlank { "Other" } }
                 .distinct()
                 .sortedBy { it.lowercase() }
@@ -269,7 +275,7 @@ class ArkuiBuilderPanel(private val project: Project) : JPanel(BorderLayout()) {
 
         val q = search.text.trim().lowercase()
         val filtered = all.filter { w ->
-            w.mainCategory.ifBlank { "Other" } == platform &&
+            platformOf(w) == platform &&
                 (category == null || w.category.ifBlank { "Other" } == category) &&
                 (
                     q.isEmpty() ||
