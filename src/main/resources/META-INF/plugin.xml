@@ -13,15 +13,38 @@
                 anchor="right"
                 icon="AllIcons.Toolwindows.ToolWindowPalette"
                 factoryClass="com.arkuibuilder.tool.ui.ArkuiBuilderToolWindowFactory"/>
+        <notificationGroup id="ArkUIBuilder" displayType="BALLOON"/>
+        <completion.contributor
+                language="any"
+                order="first"
+                implementationClass="com.arkuibuilder.tool.completion.WidgetCompletionContributor"/>
     </extensions>
 
     <actions>
+        <action
+                id="com.arkuibuilder.tool.AddWidget"
+                class="com.arkuibuilder.tool.actions.AddWidgetAction"
+                text="ArkUIBuilder Widget…"
+                description="Search ArkUIBuilder widgets and add one at the caret (file, import and call)"
+                icon="AllIcons.Toolwindows.ToolWindowPalette">
+            <add-to-group group-id="GenerateGroup" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift A"/>
+            <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="meta alt shift A"/>
+        </action>
         <action
                 id="com.arkuibuilder.tool.ShowToolWindow"
                 class="com.arkuibuilder.tool.actions.ShowArkuiBuilderAction"
                 text="Open ArkUIBuilder"
                 description="Open the ArkUIBuilder tool window">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+        <action
+                id="com.arkuibuilder.tool.SaveSelectionAsWidget"
+                class="com.arkuibuilder.tool.actions.SaveSelectionAsWidgetAction"
+                text="Save Selection to My Widgets"
+                description="Save the selected ArkTS code as a reusable widget in ArkUIBuilder">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
     </actions>
 </idea-plugin>

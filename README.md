@@ -19,7 +19,7 @@ Companion to [ArkUIBuilder](https://huaweidevelopers.com) (`arkuibuild`).
 ZIP output:
 
 ```text
-build/distributions/arkuibuildertool-0.3.3.zip
+build/distributions/arkuibuildertool-0.4.0.zip
 ```
 
 Flow: **Platform → GIF gallery → code** (optional Category filter, Firestore `mainCategory` / `category`). Previews use `proxyImage` and load lazily as you scroll.
@@ -42,7 +42,40 @@ Or install from disk: gear → **Install Plugin from Disk…** → select the ZI
 - Right tool window: **ArkUIBuilder**
 - Or `Tools` → **Open ArkUIBuilder**
 - Catalog loads from Firebase (`getWidgetCatalog`); PNG/GIF via `proxyImage`
-- Pick a platform → click a GIF → code appears below → **Insert into editor** / **Copy code** / **Refresh**
+- Pick a platform → click a GIF → code appears below → **Add to code** / **Copy code** / **Refresh**
+
+### Adding a widget to your code
+
+Catalog widgets are full `@Component` structs, so they are imported, not pasted:
+
+1. the struct is saved as `<module>/src/main/ets/components/<Name>.ets` (reused if it is already
+   there; if that file differs you choose Keep Existing / Replace)
+2. the current file gets `import { Name } from '../components/Name'`
+3. only the call is inserted at the caret, e.g. `Name({ step: this.step })`; Tab moves through the
+   required parameters (`@Link`, `@ObjectLink`, `@Prop`/`@Param` without a default, `@Require`)
+
+If the widget uses `$r('app.…')` / `$rawfile()` resources the module lacks, a notification lists
+them. Plain snippets (no struct) and files outside `src/main/ets` get the code itself, re-indented.
+
+Ways to trigger it, all with the same result:
+
+- **Add to code** in the tool window
+- Code completion in an `.ets` file: type part of the component name, e.g. `ColorSt`
+- **⌘⌥⇧A** (Ctrl+Alt+Shift+A), **Generate** (⌘N / Alt+Insert) or the editor context menu →
+  **ArkUIBuilder Widget…**, a searchable list of all widgets
+- Drag a preview from the gallery into the editor
+
+### My Widgets
+
+Users can keep their own widgets next to the catalog. They are stored only on that machine and are
+available in every project.
+
+- **New widget** (top of the panel), or select code in the editor → right-click →
+  **Save Selection to My Widgets**
+- Fields: name, platform, category, description, tags, optional preview image (GIF/PNG/JPG), code
+- Pick **My Widgets** in the Platform list to browse them; select one to **Edit** or **Delete**
+- Stored in `<IDE config dir>/arkuibuilder/my-widgets.json`, preview images in `previews/` next to
+  it. Copy that folder to move the widgets to another machine.
 
 ## Publish to JetBrains Marketplace
 

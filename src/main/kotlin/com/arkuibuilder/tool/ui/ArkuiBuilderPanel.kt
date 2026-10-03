@@ -1,10 +1,15 @@
 package com.arkuibuilder.tool.ui
 
 import com.arkuibuilder.tool.api.CatalogApi
+import com.arkuibuilder.tool.api.CatalogCache
+import com.arkuibuilder.tool.importer.ComponentParser
+import com.arkuibuilder.tool.importer.WidgetImporter
+import com.arkuibuilder.tool.model.MyWidgetsStore
 import com.arkuibuilder.tool.model.SampleCatalog
 import com.arkuibuilder.tool.model.WidgetSnippet
+import com.intellij.openapi.Disposable
+import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.ComboBox
@@ -33,23 +38,28 @@ import java.awt.Rectangle
 import java.awt.RenderingHints
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
+import java.awt.datatransfer.Transferable
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.image.ImageObserver
 import java.net.HttpURLConnection
+import java.io.File
 import java.net.URI
 import java.util.concurrent.ConcurrentHashMap
 import javax.swing.DefaultComboBoxModel
 import javax.swing.JButton
+import javax.swing.JComponent
 import javax.swing.JPanel
 import javax.swing.JTextArea
 import javax.swing.Scrollable
 import javax.swing.SwingConstants
 import javax.swing.SwingUtilities
+import javax.swing.TransferHandler
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
 
-class ArkuiBuilderPanel(private val project: Project) : JPanel(BorderLayout()) {
+class ArkuiBuilderPanel(private val project: Project) : JPanel(BorderLayout()), Disposable {
+    /** The Firebase catalog (or offline samples). The user's own widgets live in [MyWidgetsStore]. */
     private var all: List<WidgetSnippet> = emptyList()
     private val statusLabel = JBLabel("Loading Firebase catalog…")
     private val gallery = GalleryPanel { loadVisibleCards() }
@@ -74,6 +84,12 @@ class ArkuiBuilderPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
     private val search = SearchTextField()
     private val refreshButton = JButton("Refresh")
+    private val newButton = JButton("New widget").apply {
+        toolTipText = "Save your own widget to My Widgets"
+    }
+    private val editButton = JButton("Edit").apply { isVisible = false }
+    private val deleteButton = JButton("Delete").apply { isVisible = false }
+    private val removeStoreListener: () -> Unit
     private val platformCombo = ComboBox<String>()
     private val categoryCombo = ComboBox<String>()
     private var suppressEvents = false
@@ -119,15 +135,29 @@ class ArkuiBuilderPanel(private val project: Project) : JPanel(BorderLayout()) {
 
         val header = JPanel(BorderLayout(8, 8)).apply {
             add(JBLabel("ArkUIBuilder · Firebase"), BorderLayout.WEST)
-            add(refreshButton, BorderLayout.EAST)
+            add(
+                JPanel(FlowLayout(FlowLayout.RIGHT, 6, 0)).apply {
+                    add(newButton)
+                    add(refreshButton)
+                },
+                BorderLayout.EAST,
+            )
             add(filters, BorderLayout.SOUTH)
         }
 
         val actions = JPanel(BorderLayout()).apply {
             add(
                 JPanel(FlowLayout(FlowLayout.LEFT)).apply {
-                    add(JButton("Insert into editor").also { it.addActionListener { insertSelected() } })
+                    add(
+                        JButton("Add to code").also {
+                            it.toolTipText = "Save the component as components/<Name>.ets, import it into the " +
+                                "current file and insert the call at the caret"
+                            it.addActionListener { insertSelected() }
+                        },
+                    )
                     add(JButton("Copy code").also { it.addActionListener { copySelected() } })
+                    add(editButton)
+                    add(deleteButton)
                 },
                 BorderLayout.WEST,
             )
@@ -161,7 +191,18 @@ class ArkuiBuilderPanel(private val project: Project) : JPanel(BorderLayout()) {
         galleryScroll.viewport.addChangeListener { loadVisibleCards() }
 
         refreshButton.addActionListener { loadCatalog() }
+        newButton.addActionListener { createWidget() }
+        editButton.addActionListener { editSelected() }
+        deleteButton.addActionListener { deleteSelected() }
+        // Widgets can also be saved from the editor's context menu; show them as they arrive.
+        removeStoreListener = MyWidgetsStore.addListener {
+            SwingUtilities.invokeLater { onMyWidgetsChanged(selectId = null) }
+        }
         loadCatalog()
+    }
+
+    override fun dispose() {
+        removeStoreListener()
     }
 
     private fun loadCatalog() {
@@ -169,7 +210,7 @@ class ArkuiBuilderPanel(private val project: Project) : JPanel(BorderLayout()) {
         refreshButton.isEnabled = false
         ApplicationManager.getApplication().executeOnPooledThread {
             try {
-                val widgets = CatalogApi.fetchWidgets()
+                val widgets = CatalogCache.fetch()
                 SwingUtilities.invokeLater {
                     all = widgets
                     rebuildPlatforms(selectFirst = true)
@@ -213,12 +254,17 @@ class ArkuiBuilderPanel(private val project: Project) : JPanel(BorderLayout()) {
                     .thenBy { it.lowercase() },
             )
 
+        val current = selectedPlatform()
         suppressEvents = true
-        val platformItems = mutableListOf("Select platform…")
+        val platformItems = mutableListOf("Select platform…", MyWidgetsStore.PLATFORM)
         platformItems.addAll(platforms)
         platformCombo.model = DefaultComboBoxModel(platformItems.toTypedArray())
-        platformCombo.isEnabled = platforms.isNotEmpty()
-        platformCombo.selectedIndex = if (selectFirst && platforms.size == 1) 1 else 0
+        platformCombo.isEnabled = true
+        platformCombo.selectedIndex = when {
+            current != null && current in platformItems -> platformItems.indexOf(current)
+            selectFirst && platforms.size == 1 -> 2
+            else -> 0
+        }
         suppressEvents = false
         onPlatformChanged()
     }
@@ -235,23 +281,39 @@ class ArkuiBuilderPanel(private val project: Project) : JPanel(BorderLayout()) {
         return categoryCombo.selectedItem as? String
     }
 
-    private fun onPlatformChanged() {
-        val platform = selectedPlatform()
-        val categories = if (platform == null) {
-            emptyList()
+    private fun isMyWidgets(platform: String?) = platform == MyWidgetsStore.PLATFORM
+
+    /** Widgets listed under [platform]: the user's own, or that platform's slice of the catalog. */
+    private fun widgetsFor(platform: String): List<WidgetSnippet> =
+        if (isMyWidgets(platform)) {
+            MyWidgetsStore.widgets().sortedBy { it.title.lowercase() }
         } else {
             all.filter { platformOf(it) == platform }
+        }
+
+    private fun categoriesFor(platform: String?): List<String> =
+        if (platform == null) {
+            emptyList()
+        } else {
+            widgetsFor(platform)
                 .map { it.category.ifBlank { "Other" } }
                 .distinct()
                 .sortedBy { it.lowercase() }
         }
 
-        suppressEvents = true
+    private fun setCategories(categories: List<String>, keep: String?) {
         val categoryItems = mutableListOf("All categories")
         categoryItems.addAll(categories)
         categoryCombo.model = DefaultComboBoxModel(categoryItems.toTypedArray())
-        categoryCombo.isEnabled = platform != null && categories.isNotEmpty()
-        categoryCombo.selectedIndex = 0
+        categoryCombo.isEnabled = categories.isNotEmpty()
+        categoryCombo.selectedIndex = keep?.let { categoryItems.indexOf(it) }?.takeIf { it > 0 } ?: 0
+    }
+
+    private fun onPlatformChanged() {
+        val platform = selectedPlatform()
+
+        suppressEvents = true
+        setCategories(categoriesFor(platform), keep = null)
         search.text = ""
         search.isEnabled = platform != null
         suppressEvents = false
@@ -274,9 +336,8 @@ class ArkuiBuilderPanel(private val project: Project) : JPanel(BorderLayout()) {
         val category = selectedCategory()
 
         val q = search.text.trim().lowercase()
-        val filtered = all.filter { w ->
-            platformOf(w) == platform &&
-                (category == null || w.category.ifBlank { "Other" } == category) &&
+        val filtered = widgetsFor(platform).filter { w ->
+            (category == null || w.category.ifBlank { "Other" } == category) &&
                 (
                     q.isEmpty() ||
                         w.title.lowercase().contains(q) ||
@@ -285,8 +346,66 @@ class ArkuiBuilderPanel(private val project: Project) : JPanel(BorderLayout()) {
                     )
         }
 
-        showGallery(filtered, hint = "No widgets match")
+        val hint = when {
+            !isMyWidgets(platform) -> "No widgets match"
+            MyWidgetsStore.widgets().isEmpty() -> "No saved widgets yet · click New widget"
+            else -> "No widgets match"
+        }
+        showGallery(filtered, hint = hint)
         statusLabel.text = "$platform · ${category ?: "All categories"} · ${filtered.size} widgets"
+    }
+
+    /** Re-lists My Widgets after a change, keeping filters; [selectId] picks a card afterwards. */
+    private fun onMyWidgetsChanged(selectId: String?) {
+        if (selectId != null && !isMyWidgets(selectedPlatform())) {
+            platformCombo.selectedItem = MyWidgetsStore.PLATFORM // fires onPlatformChanged
+        } else if (isMyWidgets(selectedPlatform())) {
+            val keepSelection = selectId ?: selected()?.id
+            suppressEvents = true
+            setCategories(categoriesFor(MyWidgetsStore.PLATFORM), keep = selectedCategory())
+            suppressEvents = false
+            applyFilters()
+            if (keepSelection != null) selectById(keepSelection)
+            return
+        } else {
+            return
+        }
+        if (selectId != null) selectById(selectId)
+    }
+
+    private fun selectById(id: String) {
+        val card = gallery.components.firstOrNull { (it as? WidgetCard)?.snippet?.id == id } as? WidgetCard ?: return
+        selectCard(card)
+        SwingUtilities.invokeLater { gallery.scrollRectToVisible(card.bounds) }
+    }
+
+    private fun myCategories() = MyWidgetsStore.widgets().map { it.category }.filter { it.isNotBlank() }
+
+    private fun createWidget() {
+        val dialog = MyWidgetDialog(project, categories = myCategories())
+        if (dialog.showAndGet()) dialog.saved?.let { onMyWidgetsChanged(selectId = it.id) }
+    }
+
+    private fun editSelected() {
+        val snippet = selected()?.takeIf { MyWidgetsStore.isMine(it) } ?: return
+        val dialog = MyWidgetDialog(project, existing = snippet, categories = myCategories())
+        if (dialog.showAndGet()) dialog.saved?.let { onMyWidgetsChanged(selectId = it.id) }
+    }
+
+    private fun deleteSelected() {
+        val snippet = selected()?.takeIf { MyWidgetsStore.isMine(it) } ?: return
+        val answer = Messages.showYesNoDialog(
+            project,
+            "Delete “${snippet.title}” from My Widgets? This cannot be undone.",
+            "ArkUIBuilder",
+            Messages.getQuestionIcon(),
+        )
+        if (answer != Messages.YES) return
+        try {
+            MyWidgetsStore.delete(snippet.id)
+        } catch (e: Exception) {
+            Messages.showErrorDialog(project, "Could not delete the widget:\n${e.message}", "ArkUIBuilder")
+        }
     }
 
     private fun showGallery(widgets: List<WidgetSnippet>, hint: String) {
@@ -315,6 +434,9 @@ class ArkuiBuilderPanel(private val project: Project) : JPanel(BorderLayout()) {
     private fun selectCard(card: WidgetCard?) {
         selectedCard?.setSelected(false)
         selectedCard = card
+        val mine = card != null && MyWidgetsStore.isMine(card.snippet)
+        editButton.isVisible = mine
+        deleteButton.isVisible = mine
         if (card == null) {
             codePreview.text = ""
             splitter.secondComponent = null
@@ -344,12 +466,9 @@ class ArkuiBuilderPanel(private val project: Project) : JPanel(BorderLayout()) {
             )
             return
         }
-        WriteCommandAction.runWriteCommandAction(project) {
-            val document = editor.document
-            val caret = editor.caretModel.offset
-            document.insertString(caret, snippet.code + "\n")
-            editor.caretModel.moveToOffset(caret + snippet.code.length + 1)
-        }
+        WidgetImporter.import(project, editor, snippet)
+        // Hand focus back so the user can Tab through the parameters right away.
+        FileEditorManager.getInstance(project).selectedTextEditor?.contentComponent?.requestFocusInWindow()
     }
 
     private fun copySelected() {
@@ -371,11 +490,29 @@ class ArkuiBuilderPanel(private val project: Project) : JPanel(BorderLayout()) {
             add(preview, BorderLayout.CENTER)
             add(JBLabel(snippet.title, SwingConstants.CENTER), BorderLayout.SOUTH)
             setSelected(false)
-            val click = object : MouseAdapter() {
+            toolTipText = "${toolTipText}  ·  Drag into the editor to add it there"
+            transferHandler = CardTransferHandler()
+            val mouse = object : MouseAdapter() {
+                private var pressedAt: Point? = null
+
                 override fun mouseClicked(e: MouseEvent) = selectCard(this@WidgetCard)
+
+                override fun mousePressed(e: MouseEvent) {
+                    pressedAt = SwingUtilities.convertPoint(e.component, e.point, this@WidgetCard)
+                }
+
+                override fun mouseDragged(e: MouseEvent) {
+                    val start = pressedAt ?: return
+                    val now = SwingUtilities.convertPoint(e.component, e.point, this@WidgetCard)
+                    if (start.distance(now) < JBUI.scale(6)) return
+                    pressedAt = null
+                    transferHandler.exportAsDrag(this@WidgetCard, e, TransferHandler.COPY)
+                }
             }
-            addMouseListener(click)
-            preview.addMouseListener(click)
+            for (target in listOf(this, preview)) {
+                target.addMouseListener(mouse)
+                target.addMouseMotionListener(mouse)
+            }
         }
 
         fun setSelected(selected: Boolean) {
@@ -392,7 +529,12 @@ class ArkuiBuilderPanel(private val project: Project) : JPanel(BorderLayout()) {
         fun startLoading() {
             if (loadStarted || snippet.gifUrl.isBlank()) return
             loadStarted = true
-            val mediaUrl = CatalogApi.resolveMediaUrl(snippet.gifUrl) ?: run {
+            // My Widgets previews are local image files.
+            val mediaUrl = if (MyWidgetsStore.isMine(snippet)) {
+                snippet.gifUrl
+            } else {
+                CatalogApi.resolveMediaUrl(snippet.gifUrl)
+            } ?: run {
                 preview.text = "No preview"
                 return
             }
@@ -421,6 +563,34 @@ class ArkuiBuilderPanel(private val project: Project) : JPanel(BorderLayout()) {
         }
     }
 
+    /**
+     * Dragging a card drops the call (or, for plain snippets, the code) wherever the user releases
+     * it in the editor; the component file and import are added once the drop has landed.
+     */
+    private inner class CardTransferHandler : TransferHandler() {
+        override fun getSourceActions(c: JComponent) = COPY
+
+        override fun createTransferable(c: JComponent): Transferable? {
+            val snippet = (c as? WidgetCard)?.snippet ?: return null
+            return StringSelection(ComponentParser.parse(snippet.code)?.callText() ?: snippet.code)
+        }
+
+        override fun exportDone(source: JComponent, data: Transferable?, action: Int) {
+            if (action == NONE) return
+            val snippet = (source as? WidgetCard)?.snippet ?: return
+            val call = ComponentParser.parse(snippet.code)?.callText() ?: return
+            // The editor the text landed in: the selected one if it has it, else any open one that does.
+            val selected = FileEditorManager.getInstance(project).selectedTextEditor
+            val editor = (listOfNotNull(selected) + EditorFactory.getInstance().allEditors.filter { it.project == project })
+                .firstOrNull { it.document.text.contains(call) } ?: return
+            SwingUtilities.invokeLater {
+                if (!project.isDisposed && !editor.isDisposed) {
+                    WidgetImporter.import(project, editor, snippet, WidgetImporter.Mode.FILE_AND_IMPORT)
+                }
+            }
+        }
+    }
+
     private companion object {
         const val PREFETCH_MARGIN = 200
 
@@ -429,6 +599,11 @@ class ArkuiBuilderPanel(private val project: Project) : JPanel(BorderLayout()) {
         val imageCache = ConcurrentHashMap<String, Image>()
 
         fun loadImage(mediaUrl: String): Image? {
+            if (!mediaUrl.startsWith("http")) {
+                val file = File(mediaUrl)
+                if (!file.isFile) return null
+                return decode(file.readBytes())?.also { imageCache[mediaUrl] = it }
+            }
             val connection = (URI.create(mediaUrl).toURL().openConnection() as HttpURLConnection).apply {
                 connectTimeout = 15_000
                 readTimeout = 30_000
@@ -439,12 +614,16 @@ class ArkuiBuilderPanel(private val project: Project) : JPanel(BorderLayout()) {
             } finally {
                 connection.disconnect()
             }
+            return decode(bytes)?.also { imageCache[mediaUrl] = it }
+        }
+
+        /** Toolkit (not ImageIO) so animated GIFs keep animating. */
+        fun decode(bytes: ByteArray): Image? {
             val image = Toolkit.getDefaultToolkit().createImage(bytes)
             val tracker = MediaTracker(JPanel())
             tracker.addImage(image, 0)
             tracker.waitForID(0, 20_000)
             if (tracker.isErrorID(0) || image.getWidth(null) <= 0) return null
-            imageCache[mediaUrl] = image
             return image
         }
     }
